@@ -1,5 +1,6 @@
 import asyncio
 from email import message_from_binary_file
+from aiogram.enums import ParseMode
 import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -103,20 +104,18 @@ async def check_new_orders(msg):
             orders = data.get('orders', [])
             
             if not orders:
-                await msg.answer("Новых заказов нет...")
                 first_run = False
                 await asyncio.sleep(interval)
                 continue
                 
-            if first_run:
-                processed_orders.update(order['id'] for order in orders)
-                first_run = False  # Устанавливаем флаг в False после первого запуска
-                await msg.answer( "Первый запуск завершен. Все текущие заказы добавлены.")
-                await asyncio.sleep(interval)
-                continue
+            # if first_run:
+            #     processed_orders.update(order['id'] for order in orders)
+            #     first_run = False  # Устанавливаем флаг в False после первого запуска
+            #     await msg.answer( "Первый запуск завершен. Все текущие заказы добавлены.")
+            #     await asyncio.sleep(interval)
+            #     continue
             new_orders = [order for order in orders if order['id'] not in processed_orders]
             if not new_orders:
-                await msg.answer( "Новых заказов нет.")
                 await asyncio.sleep(interval)
                 continue
             processed_orders.update(order['id'] for order in new_orders)
@@ -127,7 +126,7 @@ async def check_new_orders(msg):
             # Формирование деталей по каждому заказу
             order_details = "\n".join(
                 [
-                    f"Заказ ID: {order['id']}, Сумма: {format_number(order['price']/100)} {get_currency_info(order['currencyCode'])}, "
+                    f"Код товара: {order['article']}, Сумма: {format_number(order['salePrice']/100)}, ID: <code>{order['id']}</code> , {get_currency_info(order['currencyCode'])}, "
                     f"Дата: {order['createdAt']}"
                     for order in new_orders
                 ]
@@ -139,7 +138,7 @@ async def check_new_orders(msg):
                 f"Общая сумма: {format_number(total_sum/100)} {get_currency_info(new_orders[0]['currencyCode'])}\n\n"
                 f"Детали заказов:\n{order_details}"
             )
-            await msg.answer(message_text)
+            await msg.answer(message_text, parse_mode=ParseMode.HTML)
         else:
             await msg.answer(f"Ошибка при запросе к API Wildberries: {response.status_code} - {response.text}")
         # await bot.send_message(chat_id, "Новый заказ!")  # Пример отправки сообщения о новом заказе

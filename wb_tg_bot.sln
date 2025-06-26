@@ -1,0 +1,23 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.34330.188
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "wb_tg_bot", "wb_tg_bot\wb_tg_bot.pyproj", "{FF749409-3045-467F-9EEC-8697C7B73D81}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FF749409-3045-467F-9EEC-8697C7B73D81}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FF749409-3045-467F-9EEC-8697C7B73D81}.Release|Any CPU.ActiveCfg = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {708EB2CE-37A5-4E91-905A-D73E02D583C9}
+	EndGlobalSection
+EndGlobal
