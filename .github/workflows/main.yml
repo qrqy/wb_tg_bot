@@ -1,0 +1,46 @@
+name: Manual Build & Deploy by Commit SHA
+
+on:
+  workflow_dispatch:
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Extract short commit SHA
+      id: vars
+      run: |
+        COMMIT_SHA=$(git rev-parse --short HEAD)
+        echo "TAG=$COMMIT_SHA" >> $GITHUB_ENV
+        echo "IMAGE=ghcr.io/${{ secrets.GHCR_USERNAME }}/mybot:$COMMIT_SHA" >> $GITHUB_ENV
+
+    - name: Log in to GHCR
+      run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
+
+    - name: Build and push Docker image
+      run: |
+        docker build -t $IMAGE .
+        docker push $IMAGE
+
+    - name: Deploy to remote server
+      uses: appleboy/ssh-action@v1
+      with:
+        host: ${{ secrets.DEPLOY_HOST }}
+        username: ${{ secrets.DEPLOY_USER }}
+        key: ${{ secrets.DEPLOY_KEY }}
+        port: ${{ secrets.DEPLOY_PORT }}
+        script: |
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
+          docker pull $IMAGE
+
+          docker stop mybot || true
+          docker rm mybot || true
+
+          docker run -d \
+            --name mybot \
+            --restart always \
+            -e BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
+            $IMAGE
