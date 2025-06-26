@@ -20,7 +20,17 @@ jobs:
     - name: Log in to GHCR
       run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
 
+    - name: Check if image exists
+      id: image-check
+      run: |
+        TOKEN=$(echo -n "${{ secrets.GHCR_USERNAME }}:${{ secrets.GHCR_TOKEN }}" | base64)
+        CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Basic $TOKEN" \
+          https://ghcr.io/v2/${{ secrets.GHCR_USERNAME }}/wb_tg_bot/manifests/$TAG)
+        echo "EXISTS=$CODE" >> $GITHUB_ENV
+
     - name: Build and push Docker image
+      if: env.EXISTS != '200'
       run: |
         docker build -t $IMAGE .
         docker push $IMAGE
