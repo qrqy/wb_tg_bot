@@ -44,7 +44,7 @@ jobs:
         port: ${{ secrets.DEPLOY_PORT }}
         script: |
           echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
-          docker pull $IMAGE
+          docker pull ghcr.io/${{ secrets.GHCR_USERNAME }}/wb_tg_bot:$(git rev-parse --short HEAD)
 
           docker stop wb_tg_bot || true
           docker rm wb_tg_bot || true
@@ -54,4 +54,4 @@ jobs:
             --restart unless-stopped \
             -e BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
             -v /app/config.py:${{ secrets.DEPLOY_CONFIG_PATH }}
-            $IMAGE
+            ghcr.io/${{ secrets.GHCR_USERNAME }}/wb_tg_bot:$(git rev-parse --short HEAD)
