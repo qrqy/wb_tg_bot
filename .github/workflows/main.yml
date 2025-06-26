@@ -15,7 +15,7 @@ jobs:
       run: |
         COMMIT_SHA=$(git rev-parse --short HEAD)
         echo "TAG=$COMMIT_SHA" >> $GITHUB_ENV
-        echo "IMAGE=ghcr.io/${{ secrets.GHCR_USERNAME }}/mybot:$COMMIT_SHA" >> $GITHUB_ENV
+        echo "IMAGE=ghcr.io/${{ secrets.GHCR_USERNAME }}/wb_tg_bot:$COMMIT_SHA" >> $GITHUB_ENV
 
     - name: Log in to GHCR
       run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
@@ -36,11 +36,11 @@ jobs:
           echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
           docker pull $IMAGE
 
-          docker stop mybot || true
-          docker rm mybot || true
+          docker stop wb_tg_bot || true
+          docker rm wb_tg_bot || true
 
           docker run -d \
-            --name mybot \
-            --restart always \
+            --name wb_tg_bot \
+            --restart unless-stopped \
             -e BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
             $IMAGE
