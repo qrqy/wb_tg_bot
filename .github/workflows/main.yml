@@ -53,4 +53,5 @@ jobs:
             --name wb_tg_bot \
             --restart unless-stopped \
             -e BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
+            -v /app/config.py:${{ secrets.DEPLOY_CONFIG_PATH }}
             $IMAGE
