@@ -170,3 +170,5 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 /wb_tg_bot/config.py
+/.vs/wb_tg_bot/FileContentIndex/9b8575db-d9c4-437a-aeb5-eb6dffb58bc9.vsidx
+/.vs/wb_tg_bot/v17
