@@ -224,7 +224,16 @@ async def check_balance(msg):
                 # Получаем символ валюты
                 currency_symbol = get_currency_symbol(currency)
                 
-                # Проверяем изменения текущего баланса
+                # Первый запуск - инициализируем значения без уведомления
+                if current_balance is None:
+                    current_balance = current
+                    await msg.answer(f"💰 Первоначальный баланс установлен: {format_number(current/100)} {currency_symbol}")
+                
+                if for_withdraw_balance is None:
+                    for_withdraw_balance = for_withdraw
+                    await msg.answer(f"💳 Первоначальный баланс для вывода установлен: {format_number(for_withdraw/100)} {currency_symbol}")
+                
+                # Проверяем изменения текущего баланса (только после инициализации)
                 if current_balance is not None and current != current_balance:
                     difference = current - current_balance
                     trend = "📈" if difference > 0 else "📉"
@@ -237,8 +246,9 @@ async def check_balance(msg):
                         f"• Разница: {format_number(difference/100)} {currency_symbol}"
                     )
                     await msg.answer(message_text, parse_mode=ParseMode.HTML)
+                    current_balance = current  # Обновляем только после отправки уведомления
                 
-                # Проверяем изменения баланса для вывода
+                # Проверяем изменения баланса для вывода (только после инициализации)
                 if for_withdraw_balance is not None and for_withdraw != for_withdraw_balance:
                     difference = for_withdraw - for_withdraw_balance
                     trend = "📈" if difference > 0 else "📉"
@@ -251,16 +261,7 @@ async def check_balance(msg):
                         f"• Разница: {format_number(difference/100)} {currency_symbol}"
                     )
                     await msg.answer(message_text, parse_mode=ParseMode.HTML)
-                
-                # Обновляем значения (для первого запуска)
-                if current_balance is None:
-                    current_balance = current
-                if for_withdraw_balance is None:
-                    for_withdraw_balance = for_withdraw
-                
-                # Обновляем текущие значения
-                current_balance = current
-                for_withdraw_balance = for_withdraw
+                    for_withdraw_balance = for_withdraw  # Обновляем только после отправки уведомления
                 
             else:
                 await msg.answer(f"❌ Ошибка при запросе баланса: {response.status_code} - {response.text}")
