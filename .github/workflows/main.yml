@@ -1,0 +1,57 @@
+name: Manual Build & Deploy by Commit SHA
+
+on:
+  workflow_dispatch:
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Extract short commit SHA
+      id: vars
+      run: |
+        COMMIT_SHA=$(git rev-parse --short HEAD)
+        echo "TAG=$COMMIT_SHA" >> $GITHUB_ENV
+        echo "IMAGE=ghcr.io/${{ secrets.GHCR_USERNAME }}/wb_tg_bot:$COMMIT_SHA" >> $GITHUB_ENV
+
+    - name: Log in to GHCR
+      run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
+
+    - name: Check if image exists
+      id: image-check
+      run: |
+        TOKEN=$(echo -n "${{ secrets.GHCR_USERNAME }}:${{ secrets.GHCR_TOKEN }}" | base64)
+        CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Basic $TOKEN" \
+          https://ghcr.io/v2/${{ secrets.GHCR_USERNAME }}/wb_tg_bot/manifests/$TAG)
+        echo "EXISTS=$CODE" >> $GITHUB_ENV
+
+    - name: Build and push Docker image
+      if: env.EXISTS != '200'
+      run: |
+        docker build -t $IMAGE .
+        docker push $IMAGE
+
+    - name: Deploy to remote server
+      uses: appleboy/ssh-action@v1
+      with:
+        host: ${{ secrets.DEPLOY_HOST }}
+        username: ${{ secrets.DEPLOY_USER }}
+        key: ${{ secrets.DEPLOY_KEY }}
+        port: ${{ secrets.DEPLOY_PORT }}
+        script: |
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GHCR_USERNAME }} --password-stdin
+          docker pull ${{ env.IMAGE }}
+
+          docker stop wb_tg_bot || true
+          docker rm wb_tg_bot || true
+
+          docker run -d \
+            --name wb_tg_bot \
+            --restart unless-stopped \
+            -e BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
+            -v ${{ secrets.DEPLOY_CONFIG_PATH }}:/app/config.py \
+            ${{ env.IMAGE }}

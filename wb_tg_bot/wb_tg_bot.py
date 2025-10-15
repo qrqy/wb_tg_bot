@@ -1,5 +1,4 @@
 import asyncio
-from email import message_from_binary_file
 from aiogram.enums import ParseMode
 import requests
 from aiogram import Bot, Dispatcher, types
