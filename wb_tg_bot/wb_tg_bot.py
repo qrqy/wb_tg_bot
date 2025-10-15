@@ -7,8 +7,12 @@ from aiogram.filters import Command
 from config import API_TOKEN, WB_API, interval
 
 processed_orders = set()
+processed_balance = set()
 first_run = True
 check_wb_task = None
+
+current_balance = None
+for_withdraw_balance = None
 
 currency_mapping = {
     643: ('RUB', '₽', 'Российский рубль'),
@@ -35,7 +39,11 @@ async def start_handler(message: types.Message):
             await message.answer("Начинаю выполнение функции проверки новых заказов")
         else:
             await message.answer("Функция проверки уже выполняется")
-
+        if processed_balance is None or processed_balance.done():
+            processed_balance = asyncio.create_task(check_balance(message))
+            await message.answer("Начинаю выполнение функции проверки баланса")
+        else:
+            await message.answer("Функция проверки баланса уже выполняется")
     else:
         await message.answer("WB API не подключено(((");
         await message.answer("Выполнение функции прервано");
@@ -143,6 +151,37 @@ async def check_new_orders(msg):
             await msg.answer(f"Ошибка при запросе к API Wildberries: {response.status_code} - {response.text}")
         # await bot.send_message(chat_id, "Новый заказ!")  # Пример отправки сообщения о новом заказе
         await asyncio.sleep(interval)
+        
+async def check_balance(msg):
+    while True:
+        # Здесь ваш код для проверки новых заказов на WB
+        url = 'https://finance-api.wildberries.ru/api/v1/account/balance';
+        headers = {'Authorization': WB_API}
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            current = data.get('current', 0)
+            for_withdraw = data.get('for_withdraw', 0)
+            if current!=current_balance:
+                message_text = (
+                    f"Изменения в балансе!\n"
+                    f"Было: {current_balance}\n"
+                    f"Стало: {current}\n\n"
+                )
+                current_balance=current
+                await msg.answer(message_text, parse_mode=ParseMode.HTML)
+            if for_withdraw!=for_withdraw_balance:
+                message_text = (
+                    f"Изменения в балансе!\n"
+                    f"Было: {for_withdraw_balance}\n"
+                    f"Стало: {for_withdraw}\n\n"
+                )
+                for_withdraw_balance=for_withdraw
+                await msg.answer(message_text, parse_mode=ParseMode.HTML)    
+        else:
+            await msg.answer(f"Ошибка при запросе к API Wildberries: {response.status_code} - {response.text}")
+        # await bot.send_message(chat_id, "Новый заказ!")  # Пример отправки сообщения о новом заказе
+        await asyncio.sleep(120)
         
 def get_currency_info(numeric_code):
     return currency_mapping.get(numeric_code, (None, None, f"Неизвестная валюта ({numeric_code})"))[1]
