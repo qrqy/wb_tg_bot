@@ -5,14 +5,16 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from config import API_TOKEN, WB_API, interval
 
+# Глобальные переменные для хранения состояния
 processed_orders = set()
-processed_balance = set()
 first_run = True
 check_wb_task = None
+check_balance_task = None
 
 current_balance = None
 for_withdraw_balance = None
 
+# Маппинг валют (числовые коды для заказов)
 currency_mapping = {
     643: ('RUB', '₽', 'Российский рубль'),
     840: ('USD', '$', 'Доллар США'),
@@ -21,7 +23,17 @@ currency_mapping = {
     156: ('CNY', '¥', 'Китайский юань'),
     826: ('GBP', '£', 'Британский фунт'),
     392: ('JPY', '¥', 'Японская иена'),
-    # Добавьте другие коды валют по необходимости
+}
+
+# Символы валют (строковые коды для баланса)
+currency_symbols = {
+    'RUB': '₽',
+    'USD': '$',
+    'EUR': '€',
+    'KZT': '₸',
+    'CNY': '¥',
+    'GBP': '£',
+    'JPY': '¥'
 }
 
 bot = Bot(token=API_TOKEN)
@@ -29,61 +41,92 @@ dp = Dispatcher()
 
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
-    global check_wb_task
-    await message.answer("Привет! Выполняю проверку апи...")
+    global check_wb_task, check_balance_task
+    await message.answer("Привет! Выполняю проверку API...")
+    
     if check():
-        await message.answer("WB API подключено");
+        await message.answer("WB API подключено")
+        
+        # Запуск проверки заказов
         if check_wb_task is None or check_wb_task.done():
             check_wb_task = asyncio.create_task(check_new_orders(message))
             await message.answer("Начинаю выполнение функции проверки новых заказов")
         else:
-            await message.answer("Функция проверки уже выполняется")
-        if processed_balance is None or processed_balance.done():
-            processed_balance = asyncio.create_task(check_balance(message))
+            await message.answer("Функция проверки заказов уже выполняется")
+        
+        # Запуск проверки баланса
+        if check_balance_task is None or check_balance_task.done():
+            check_balance_task = asyncio.create_task(check_balance(message))
             await message.answer("Начинаю выполнение функции проверки баланса")
         else:
             await message.answer("Функция проверки баланса уже выполняется")
     else:
-        await message.answer("WB API не подключено(((");
-        await message.answer("Выполнение функции прервано");
+        await message.answer("WB API не подключено(((")
+        await message.answer("Выполнение функции прервано")
+
 @dp.message(Command("chatid"))
-async def start_handler(message: types.Message):
-    chat_id = message.chat.id  # Получаем chat ID из объекта сообщения
+async def chatid_handler(message: types.Message):
+    chat_id = message.chat.id
     await message.answer(f"Chat ID этого чата: {chat_id}")
 
 @dp.message(Command("check"))
-async def start_handler(message: types.Message):
+async def check_handler(message: types.Message):
     if check():
-        await message.answer("WB API подключено");
+        await message.answer("WB API подключено")
     else:
-        await message.answer("WB API не подключено(((");
+        await message.answer("WB API не подключено(((")
+
 @dp.message(Command("status"))
 async def status_handler(message: types.Message):
-    global check_wb_task
+    global check_wb_task, check_balance_task
+    
+    # Статус проверки заказов
     if check_wb_task is None:
-        await message.answer("Функция проверки не запущена")
+        order_status = "Функция проверки заказов не запущена"
     elif check_wb_task.done():
-        await message.answer("Функция проверки завершена")
+        order_status = "Функция проверки заказов завершена"
     else:
-        await message.answer("Функция проверки выполняется")
+        order_status = "Функция проверки заказов выполняется"
+    
+    # Статус проверки баланса
+    if check_balance_task is None:
+        balance_status = "Функция проверки баланса не запущена"
+    elif check_balance_task.done():
+        balance_status = "Функция проверки баланса завершена"
+    else:
+        balance_status = "Функция проверки баланса выполняется"
+    
+    await message.answer(f"{order_status}\n{balance_status}")
+
 @dp.message(Command("stop"))
 async def stop_handler(message: types.Message):
-    global check_wb_task
+    global check_wb_task, check_balance_task
+    stopped_tasks = []
+    
+    # Остановка проверки заказов
     if check_wb_task is not None and not check_wb_task.done():
         check_wb_task.cancel()
         try:
-            await check_wb_task  # Дождемся отмены задачи
+            await check_wb_task
         except asyncio.CancelledError:
-            pass  # Задача отменена
+            pass
         check_wb_task = None
-        await message.answer("Функция проверки остановлена")
-    else:
-        await message.answer("Функция проверки не запущена")
+        stopped_tasks.append("проверки заказов")
     
-# @dp.message()
-# async def get_chat_id(message: types.Message):
-#     chat_id = message.chat.id  # Получаем chat ID из объекта сообщения
-#     await message.answer(f"Chat ID этого чата: {chat_id}")
+    # Остановка проверки баланса
+    if check_balance_task is not None and not check_balance_task.done():
+        check_balance_task.cancel()
+        try:
+            await check_balance_task
+        except asyncio.CancelledError:
+            pass
+        check_balance_task = None
+        stopped_tasks.append("проверки баланса")
+    
+    if stopped_tasks:
+        await message.answer(f"Функции {', '.join(stopped_tasks)} остановлены")
+    else:
+        await message.answer("Нет активных функций для остановки")
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
@@ -91,100 +134,159 @@ async def main():
     await dp.start_polling(bot)
 
 def check():
-    url = 'https://marketplace-api.wildberries.ru/ping';
+    """Проверка подключения к WB API"""
+    url = 'https://marketplace-api.wildberries.ru/ping'
     headers = {'Authorization': WB_API}
-    response = requests.get(url, headers=headers)
-    if(response.status_code==200):
-        return True;
-    else:
-        return False;
+    try:
+        response = requests.get(url, headers=headers)
+        return response.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
 
 async def check_new_orders(msg):
+    """Проверка новых заказов"""
     global first_run
+    
     while True:
-        # Здесь ваш код для проверки новых заказов на WB
-        url = 'https://marketplace-api.wildberries.ru/api/v3/orders/new';
-        headers = {'Authorization': WB_API}
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            orders = data.get('orders', [])
+        try:
+            url = 'https://marketplace-api.wildberries.ru/api/v3/orders/new'
+            headers = {'Authorization': WB_API}
+            response = requests.get(url, headers=headers)
             
-            if not orders:
-                first_run = False
-                await asyncio.sleep(interval)
-                continue
+            if response.status_code == 200:
+                data = response.json()
+                orders = data.get('orders', [])
                 
-            # if first_run:
-            #     processed_orders.update(order['id'] for order in orders)
-            #     first_run = False  # Устанавливаем флаг в False после первого запуска
-            #     await msg.answer( "Первый запуск завершен. Все текущие заказы добавлены.")
-            #     await asyncio.sleep(interval)
-            #     continue
-            new_orders = [order for order in orders if order['id'] not in processed_orders]
-            if not new_orders:
-                await asyncio.sleep(interval)
-                continue
-            processed_orders.update(order['id'] for order in new_orders)
-            # Подсчет количества заказов и общей суммы
-            total_orders = len(new_orders)
-            total_sum = sum(order['salePrice'] for order in new_orders)  # Общая сумма всех заказов
-
-            # Формирование деталей по каждому заказу
-            order_details = "\n".join(
-                [
-                    f"Код товара: {order['article']}, Сумма: {format_number(order['salePrice']/100)}, ID: <code>{order['id']}</code> , {get_currency_info(order['currencyCode'])}, "
-                    f"Дата: {order['createdAt']}"
-                    for order in new_orders
-                ]
-            )
-            # Формирование итогового сообщения
-            message_text = (
-                f"Новые заказы:\n"
-                f"Количество заказов: {total_orders}\n"
-                f"Общая сумма: {format_number(total_sum/100)} {get_currency_info(new_orders[0]['currencyCode'])}\n\n"
-                f"Детали заказов:\n{order_details}"
-            )
-            await msg.answer(message_text, parse_mode=ParseMode.HTML)
-        else:
-            await msg.answer(f"Ошибка при запросе к API Wildberries: {response.status_code} - {response.text}")
-        # await bot.send_message(chat_id, "Новый заказ!")  # Пример отправки сообщения о новом заказе
-        await asyncio.sleep(interval)
-        
-async def check_balance(msg):
-    while True:
-        # Здесь ваш код для проверки новых заказов на WB
-        url = 'https://finance-api.wildberries.ru/api/v1/account/balance';
-        headers = {'Authorization': WB_API}
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            current = data.get('current', 0)
-            for_withdraw = data.get('for_withdraw', 0)
-            if current!=current_balance:
-                message_text = (
-                    f"Изменения в балансе!\n"
-                    f"Было: {current_balance}\n"
-                    f"Стало: {current}\n\n"
+                if not orders:
+                    first_run = False
+                    await asyncio.sleep(interval)
+                    continue
+                
+                # Фильтруем новые заказы
+                new_orders = [order for order in orders if order['id'] not in processed_orders]
+                
+                if not new_orders:
+                    await asyncio.sleep(interval)
+                    continue
+                
+                # Добавляем новые заказы в обработанные
+                processed_orders.update(order['id'] for order in new_orders)
+                
+                # Подсчет количества заказов и общей суммы
+                total_orders = len(new_orders)
+                total_sum = sum(order['salePrice'] for order in new_orders)
+                
+                # Формирование деталей по каждому заказу
+                order_details = "\n".join(
+                    [
+                        f"📦 Код товара: {order['article']}\n"
+                        f"💵 Сумма: {format_number(order['salePrice']/100)} {get_currency_info(order['currencyCode'])}\n"
+                        f"🆔 ID: <code>{order['id']}</code>\n"
+                        f"📅 Дата: {order['createdAt']}\n"
+                        for order in new_orders
+                    ]
                 )
-                current_balance=current
+                
+                # Формирование итогового сообщения
+                message_text = (
+                    f"🎉 Новые заказы!\n\n"
+                    f"📊 Общая информация:\n"
+                    f"• Количество заказов: {total_orders}\n"
+                    f"• Общая сумма: {format_number(total_sum/100)} {get_currency_info(new_orders[0]['currencyCode'])}\n\n"
+                    f"📋 Детали заказов:\n{order_details}"
+                )
                 await msg.answer(message_text, parse_mode=ParseMode.HTML)
-            if for_withdraw!=for_withdraw_balance:
-                message_text = (
-                    f"Изменения в балансе!\n"
-                    f"Было: {for_withdraw_balance}\n"
-                    f"Стало: {for_withdraw}\n\n"
-                )
-                for_withdraw_balance=for_withdraw
-                await msg.answer(message_text, parse_mode=ParseMode.HTML)    
-        else:
-            await msg.answer(f"Ошибка при запросе к API Wildberries: {response.status_code} - {response.text}")
-        # await bot.send_message(chat_id, "Новый заказ!")  # Пример отправки сообщения о новом заказе
-        await asyncio.sleep(120)
+            else:
+                await msg.answer(f"❌ Ошибка при запросе к API Wildberries: {response.status_code} - {response.text}")
         
-def get_currency_info(numeric_code):
-    return currency_mapping.get(numeric_code, (None, None, f"Неизвестная валюта ({numeric_code})"))[1]
+        except Exception as e:
+            await msg.answer(f"❌ Ошибка в функции проверки заказов: {str(e)}")
+        
+        await asyncio.sleep(interval)
+
+async def check_balance(msg):
+    """Проверка изменений баланса"""
+    global current_balance, for_withdraw_balance
+    
+    while True:
+        try:
+            url = 'https://finance-api.wildberries.ru/api/v1/account/balance'
+            headers = {'Authorization': WB_API}
+            response = requests.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Получаем данные напрямую из ответа
+                current = data.get('current', 0)
+                for_withdraw = data.get('for_withdraw', 0)
+                currency = data.get('currency', 'RUB')
+                
+                # Получаем символ валюты
+                currency_symbol = get_currency_symbol(currency)
+                
+                # Проверяем изменения текущего баланса
+                if current_balance is not None and current != current_balance:
+                    difference = current - current_balance
+                    trend = "📈" if difference > 0 else "📉"
+                    
+                    message_text = (
+                        f"💰 Изменения в балансе! {trend}\n\n"
+                        f"Текущий баланс:\n"
+                        f"• Было: {format_number(current_balance/100)} {currency_symbol}\n"
+                        f"• Стало: {format_number(current/100)} {currency_symbol}\n"
+                        f"• Разница: {format_number(difference/100)} {currency_symbol}"
+                    )
+                    await msg.answer(message_text, parse_mode=ParseMode.HTML)
+                
+                # Проверяем изменения баланса для вывода
+                if for_withdraw_balance is not None and for_withdraw != for_withdraw_balance:
+                    difference = for_withdraw - for_withdraw_balance
+                    trend = "📈" if difference > 0 else "📉"
+                    
+                    message_text = (
+                        f"💳 Изменения в балансе для вывода! {trend}\n\n"
+                        f"Доступно для вывода:\n"
+                        f"• Было: {format_number(for_withdraw_balance/100)} {currency_symbol}\n"
+                        f"• Стало: {format_number(for_withdraw/100)} {currency_symbol}\n"
+                        f"• Разница: {format_number(difference/100)} {currency_symbol}"
+                    )
+                    await msg.answer(message_text, parse_mode=ParseMode.HTML)
+                
+                # Обновляем значения (для первого запуска)
+                if current_balance is None:
+                    current_balance = current
+                if for_withdraw_balance is None:
+                    for_withdraw_balance = for_withdraw
+                
+                # Обновляем текущие значения
+                current_balance = current
+                for_withdraw_balance = for_withdraw
+                
+            else:
+                await msg.answer(f"❌ Ошибка при запросе баланса: {response.status_code} - {response.text}")
+        
+        except Exception as e:
+            await msg.answer(f"❌ Ошибка в функции проверки баланса: {str(e)}")
+        
+        await asyncio.sleep(120)
+
+def get_currency_info(currency_code):
+    """Получает информацию о валюте по числовому или строковому коду"""
+    # Если код числовой (из заказов)
+    if isinstance(currency_code, int):
+        currency_info = currency_mapping.get(currency_code, (None, None, f"Неизвестная валюта ({currency_code})"))
+        return currency_info[1] if currency_info[1] else currency_info[2]
+    # Если код строковый (из баланса)
+    else:
+        return currency_symbols.get(currency_code, currency_code)
+
+def get_currency_symbol(currency_code):
+    """Получает символ валюты по строковому коду"""
+    return currency_symbols.get(currency_code, currency_code)
+
 def format_number(number):
+    """Форматирует число с разделителями тысяч"""
     return "{:,.2f}".format(number).replace(",", "X").replace(".", ",").replace("X", ".")
+
 if __name__ == '__main__':
     asyncio.run(main())
