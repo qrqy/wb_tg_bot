@@ -241,9 +241,9 @@ async def check_balance(msg):
                     message_text = (
                         f"💰 Изменения в балансе! {trend}\n\n"
                         f"Текущий баланс:\n"
-                        f"• Было: {format_number(current_balance/100)} {currency_symbol}\n"
-                        f"• Стало: {format_number(current/100)} {currency_symbol}\n"
-                        f"• Разница: {format_number(difference/100)} {currency_symbol}"
+                        f"• Было: {format_number(current_balance)} {currency_symbol}\n"
+                        f"• Стало: {format_number(current)} {currency_symbol}\n"
+                        f"• Разница: {format_number(difference)} {currency_symbol}"
                     )
                     await msg.answer(message_text, parse_mode=ParseMode.HTML)
                     current_balance = current  # Обновляем только после отправки уведомления
@@ -256,9 +256,9 @@ async def check_balance(msg):
                     message_text = (
                         f"💳 Изменения в балансе для вывода! {trend}\n\n"
                         f"Доступно для вывода:\n"
-                        f"• Было: {format_number(for_withdraw_balance/100)} {currency_symbol}\n"
-                        f"• Стало: {format_number(for_withdraw/100)} {currency_symbol}\n"
-                        f"• Разница: {format_number(difference/100)} {currency_symbol}"
+                        f"• Было: {format_number(for_withdraw_balance)} {currency_symbol}\n"
+                        f"• Стало: {format_number(for_withdraw)} {currency_symbol}\n"
+                        f"• Разница: {format_number(difference)} {currency_symbol}"
                     )
                     await msg.answer(message_text, parse_mode=ParseMode.HTML)
                     for_withdraw_balance = for_withdraw  # Обновляем только после отправки уведомления
