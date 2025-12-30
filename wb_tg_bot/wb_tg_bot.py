@@ -244,11 +244,11 @@ async def check_balance(msg):
                 # Первый запуск - инициализируем значения без уведомления
                 if current_balance is None:
                     current_balance = current
-                    await msg.answer(f"💰 Первоначальный баланс установлен: {format_number(current/100)} {currency_symbol}")
+                    await msg.answer(f"💰 Первоначальный баланс установлен: {format_number(current)} {currency_symbol}")
                 
                 if for_withdraw_balance is None:
                     for_withdraw_balance = for_withdraw
-                    await msg.answer(f"💳 Первоначальный баланс для вывода установлен: {format_number(for_withdraw/100)} {currency_symbol}")
+                    await msg.answer(f"💳 Первоначальный баланс для вывода установлен: {format_number(for_withdraw)} {currency_symbol}")
                 
                 # Проверяем изменения текущего баланса (только после инициализации)
                 if current_balance is not None and current != current_balance:
