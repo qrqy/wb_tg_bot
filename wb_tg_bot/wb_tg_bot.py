@@ -200,7 +200,6 @@ async def check_new_orders(msg):
                         f"💵 Сумма: {format_number(order['salePrice']/100)} {get_currency_info(order['currencyCode'])}\n"
                         f"🆔 ID: <code>{order['id']}</code>\n"
                         f"📅 Дата: {order['createdAt']}\n"
-                        f"🗺️ Место: {format_address(order.get('address', {}).get('fullAddress'))}\n"
                         for order in new_orders
                     ]
                 )
