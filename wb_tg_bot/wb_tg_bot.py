@@ -36,6 +36,22 @@ currency_symbols = {
     'JPY': '¥'
 }
 
+def format_address(full_address):
+    parts = [part.strip() for part in full_address.split(',')]
+    
+    if len(parts) >= 2:
+        # Берем область/край/республику (первая часть) и город (вторая часть)
+        result = f"{parts[0]}, {parts[1]}"
+    elif len(parts) == 1:
+        # Если нет запятых - берем как есть, но обрезаем если длинно
+        result = parts[0]
+        if len(result) > 30:
+            result = result[:27] + "..."
+    else:
+        result = full_address[:30]
+    
+    return result
+
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
@@ -183,6 +199,7 @@ async def check_new_orders(msg):
                         f"💵 Сумма: {format_number(order['salePrice']/100)} {get_currency_info(order['currencyCode'])}\n"
                         f"🆔 ID: <code>{order['id']}</code>\n"
                         f"📅 Дата: {order['createdAt']}\n"
+                        f"🗺️ Место: {format_address(order['address']['fullAddress'])}\n"
                         for order in new_orders
                     ]
                 )
