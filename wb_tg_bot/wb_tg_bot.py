@@ -3,21 +3,7 @@ from aiogram.enums import ParseMode
 import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from config import API_TOKEN, WB_API, interval, proxy
-import aiohttp
-from aiohttp_socks import ProxyConnector
-
-# Настройки прокси (получены после покупки)
-PROXY_URL = proxy  # пример: "socks5://user123:pass456@123.45.67.89:1080"
-
-# Создаём коннектор SOCKS5
-connector = ProxyConnector.from_url(PROXY_URL)
-
-# Создаём сессию aiohttp с этим коннектором
-session = aiohttp.ClientSession(connector=connector)
-
-# Создаём бота с кастомной сессией
-bot = Bot(token=API_TOKEN, session=session)
+from config import API_TOKEN, WB_API, interval
 
 # Глобальные переменные для хранения состояния
 processed_orders = set()
@@ -67,6 +53,7 @@ def format_address(full_address):
     
     return result
 
+bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
 @dp.message(Command("start"))
