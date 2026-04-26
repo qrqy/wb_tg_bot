@@ -3,7 +3,9 @@ from aiogram.enums import ParseMode
 import requests
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from config import API_TOKEN, WB_API, interval
+from config import API_TOKEN, WB_API, interval, LOCAL_BOT_API_URL
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 
 # Глобальные переменные для хранения состояния
 processed_orders = set()
@@ -53,7 +55,21 @@ def format_address(full_address):
     
     return result
 
-bot = Bot(token=API_TOKEN)
+session = None
+if LOCAL_BOT_API_URL:
+    try:
+        test_url = f"{LOCAL_BOT_API_URL}/bot{API_TOKEN}/getMe"
+        response = requests.get(test_url, timeout=5)
+        if response.status_code == 200:
+            session = AiohttpSession(api=TelegramAPIServer.from_base(LOCAL_BOT_API_URL))
+    except requests.exceptions.RequestException:
+        pass
+
+if session:
+    bot = Bot(token=API_TOKEN, session=session)
+else:
+    bot = Bot(token=API_TOKEN)
+
 dp = Dispatcher()
 
 @dp.message(Command("start"))
