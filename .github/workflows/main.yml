@@ -54,4 +54,5 @@ jobs:
             --restart unless-stopped \
             -e BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
             -v ${{ secrets.DEPLOY_CONFIG_PATH }}:/app/config.py \
+            -v wb_tg_bot_data:/data \
             ${{ env.IMAGE }}
