@@ -43,7 +43,7 @@ async def send_fire_and_forget(bot, chat_id, text):
         log.error("Failed to send message to chat %s: %s", chat_id, describe_error(exc))
 
 
-def log_task_end(task):
+def log_task_end(task, bot=None, chat_id=None):
     try:
         task.result()
     except asyncio.CancelledError as cancel:
@@ -52,3 +52,13 @@ def log_task_end(task):
         log.info("%s is stopped. Reason: %s", task.get_name(), reason)
     except Exception as exc:
         log.error("%s crashed: %s", task.get_name(), describe_error(exc), exc_info=exc)
+        if bot is not None and chat_id is not None:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(send_fire_and_forget(
+                    bot,
+                    chat_id,
+                    f"‼️ Критическая ошибка: задача «{task.get_name()}» аварийно остановилась. Подробности будут в журнале.",
+                ))
+            except RuntimeError:
+                log.error("Could not send a critical task alert: event loop is no longer running")

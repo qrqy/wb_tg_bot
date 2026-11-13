@@ -21,6 +21,12 @@ except (TypeError, ValueError):
 BALANCE_POLL_SECONDS = 120
 WB_BASE = "https://marketplace-api.wildberries.ru"
 BALANCE_URL = "https://finance-api.wildberries.ru/api/v1/account/balance"
+
+
+class WildberriesApiError(RuntimeError):
+    """A transient or rejected response from a Wildberries API endpoint."""
+
+
 EVENTS = {
     (None, "complete"): "Продавец передал заказ в доставку Wildberries",
     ("ready_for_pickup", None): "Заказ прибыл в пункт выдачи заказов (ПВЗ)",
@@ -114,6 +120,7 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 monitor_task = None
 balance_task = None
+active_chat_id = None
 
 
 def key_name(key):
@@ -139,13 +146,13 @@ async def request(session, method, path, **kwargs):
                         log.info("Retrying %s %s after HTTP %s (attempt %d/3)", method, path, resp.status, attempt + 1)
                         await asyncio.sleep(2 ** attempt)
                         continue
-                    raise RuntimeError(f"WB API {resp.status}: {body[:500]}")
+                    raise WildberriesApiError(f"WB API {resp.status}: {body[:500]}")
                 if resp.status >= 400:
-                    raise RuntimeError(f"WB API {resp.status}: {(await resp.text())[:500]}")
+                    raise WildberriesApiError(f"WB API {resp.status}: {(await resp.text())[:500]}")
                 return await resp.json()
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             if attempt == 2:
-                raise RuntimeError(f"WB API connection failed: {exc}") from exc
+                raise WildberriesApiError(f"WB API connection failed: {exc}") from exc
             log.info("Retrying %s %s after %s (attempt %d/3)", method, path, describe_error(exc), attempt + 1)
             await asyncio.sleep(2 ** attempt)
 
@@ -180,7 +187,14 @@ async def fetch_statuses(session, ids):
 
 async def deliver_outbox(chat_id):
     for row in store.pending_events():
-        await bot.send_message(chat_id, row["message"], parse_mode=ParseMode.HTML)
+        try:
+            await bot.send_message(chat_id, row["message"], parse_mode=ParseMode.HTML)
+        except Exception as exc:
+            log.warning(
+                "Telegram delivery failed for order %s; event stays queued: %s",
+                row["order_id"], describe_error(exc),
+            )
+            break
         store.mark_sent(row["order_id"], row["event_key"])
         log.info("Order %s: event %r sent to chat %s", row["order_id"], row["event_key"], chat_id)
 
@@ -216,9 +230,9 @@ async def monitor(chat_id):
                 log.info("Poll ok: %d orders, %d events queued", len(orders), queued)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
-                log.error("Orders monitor cycle failed: %s", describe_error(exc))
-                await send_fire_and_forget(bot, chat_id, "Ошибка опроса WB API; повторю позже. Подробности в журнале контейнера.")
+            except WildberriesApiError as exc:
+                # API outages and timeouts are recoverable; keep polling quietly.
+                log.warning("Orders API temporarily unavailable: %s", describe_error(exc))
             await asyncio.sleep(POLL_SECONDS)
 
 
@@ -239,35 +253,44 @@ async def monitor_balance(chat_id):
                             value = data.get(key)
                             old = store.get_balance(key)
                             if value is not None and old is not None and float(value) != old:
-                                await bot.send_message(chat_id, f"Баланс {key}: {old:,.2f} -> {float(value):,.2f}")
+                                try:
+                                    await bot.send_message(chat_id, f"Баланс {key}: {old:,.2f} -> {float(value):,.2f}")
+                                except Exception as exc:
+                                    log.warning("Could not send balance change notification: %s", describe_error(exc))
+                                    continue
                             if value is not None:
                                 store.set_balance(key, value)
                     else:
                         log.warning("Balance API returned %s: %s", resp.status, (await resp.text())[:500])
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
-                log.error("Balance monitor cycle failed: %s", describe_error(exc))
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+                # Do not message the chat for an individual balance API timeout.
+                log.warning("Balance API temporarily unavailable: %s", describe_error(exc))
+            except Exception:
+                log.exception("Balance monitor stopped after an unexpected error")
+                raise
             await asyncio.sleep(BALANCE_POLL_SECONDS)
 
 
 @dp.message(Command("start"))
 async def start_handler(message: types.Message):
-    global monitor_task, balance_task
+    global monitor_task, balance_task, active_chat_id
     try:
         await check_api()
     except Exception as exc:
         log.error("/start in chat %s: WB API unavailable: %s", message.chat.id, describe_error(exc))
         await message.answer(f"WB API недоступен: {html.escape(str(exc))}")
         return
+    active_chat_id = message.chat.id
     started = 0
     if monitor_task is None or monitor_task.done():
         monitor_task = asyncio.create_task(monitor(message.chat.id), name=f"Orders monitoring for chat {message.chat.id}")
-        monitor_task.add_done_callback(log_task_end)
+        monitor_task.add_done_callback(lambda task: log_task_end(task, bot, message.chat.id))
         started += 1
     if balance_task is None or balance_task.done():
         balance_task = asyncio.create_task(monitor_balance(message.chat.id), name=f"Balance monitoring for chat {message.chat.id}")
-        balance_task.add_done_callback(log_task_end)
+        balance_task.add_done_callback(lambda task: log_task_end(task, bot, message.chat.id))
         started += 1
     if started:
         log.info("/start in chat %s: %d tasks started", message.chat.id, started)
@@ -278,13 +301,14 @@ async def start_handler(message: types.Message):
 
 @dp.message(Command("stop"))
 async def stop_handler(message: types.Message):
-    global monitor_task, balance_task
+    global monitor_task, balance_task, active_chat_id
     tasks = [t for t in (monitor_task, balance_task) if t and not t.done()]
     for task in tasks:
         task.cancel(f"/stop in chat {message.chat.id}")
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
     monitor_task = balance_task = None
+    active_chat_id = None
     log.info("/stop in chat %s: %d tasks cancelled", message.chat.id, len(tasks))
     await message.answer("Мониторинг остановлен." if tasks else "Мониторинг не был запущен.")
 
@@ -323,7 +347,15 @@ async def main():
     log.info("Store: initialized=%s, %d tracked orders, %d pending events", store.initialized(), len(store.tracked_ids()), len(store.pending_events()))
     try:
         await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, close_bot_session=False)
+    except Exception:
+        if active_chat_id is not None:
+            await send_fire_and_forget(
+                bot,
+                active_chat_id,
+                "‼️ Критическая ошибка: основной процесс бота завершается. Подробности будут в журнале.",
+            )
+        raise
     finally:
         await bot.session.close()
 
