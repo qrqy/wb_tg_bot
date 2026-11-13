@@ -1,6 +1,5 @@
 import asyncio
 import html
-import logging
 import os
 import sqlite3
 import time
@@ -10,15 +9,16 @@ import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
+from logger import log, describe_error
+from helpers import log_task_end, log_token_expiry, send_fire_and_forget
 from config import API_TOKEN, WB_API, interval
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger(__name__)
 DB_PATH = os.getenv("WB_BOT_DB", "/data/wb_tg_bot.sqlite3")
 try:
     POLL_SECONDS = max(5, int(interval or 60))
 except (TypeError, ValueError):
     POLL_SECONDS = 60
+BALANCE_POLL_SECONDS = 120
 WB_BASE = "https://marketplace-api.wildberries.ru"
 BALANCE_URL = "https://finance-api.wildberries.ru/api/v1/account/balance"
 EVENTS = {
@@ -136,6 +136,7 @@ async def request(session, method, path, **kwargs):
                 if resp.status == 429 or resp.status >= 500:
                     body = await resp.text()
                     if attempt < 2:
+                        log.info("Retrying %s %s after HTTP %s (attempt %d/3)", method, path, resp.status, attempt + 1)
                         await asyncio.sleep(2 ** attempt)
                         continue
                     raise RuntimeError(f"WB API {resp.status}: {body[:500]}")
@@ -145,6 +146,7 @@ async def request(session, method, path, **kwargs):
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
             if attempt == 2:
                 raise RuntimeError(f"WB API connection failed: {exc}") from exc
+            log.info("Retrying %s %s after %s (attempt %d/3)", method, path, describe_error(exc), attempt + 1)
             await asyncio.sleep(2 ** attempt)
 
 
@@ -180,43 +182,44 @@ async def deliver_outbox(chat_id):
     for row in store.pending_events():
         await bot.send_message(chat_id, row["message"], parse_mode=ParseMode.HTML)
         store.mark_sent(row["order_id"], row["event_key"])
+        log.info("Order %s: event %r sent to chat %s", row["order_id"], row["event_key"], chat_id)
 
 
 async def monitor(chat_id):
     headers = {"Authorization": WB_API}
     started = datetime.now(timezone.utc)
-    try:
-        async with aiohttp.ClientSession(headers=headers) as session:
-            while True:
-                try:
-                    orders = await fetch_orders(session)
-                    ids = [int(o["id"]) for o in orders if "id" in o]
-                    statuses = await fetch_statuses(session, ids)
-                    bootstrapping = not store.initialized()
-                    for order in orders:
-                        oid = int(order["id"])
-                        state = statuses.get(oid, {})
-                        created = order.get("createdAt")
-                        genuinely_new = False
-                        if bootstrapping and created:
-                            try:
-                                genuinely_new = datetime.fromisoformat(created.replace("Z", "+00:00")) >= started
-                            except ValueError:
-                                pass
-                        elif not bootstrapping:
-                            genuinely_new = oid not in store.tracked_ids()
-                        store.upsert_order(order, state.get("supplierStatus"), state.get("wbStatus"), genuinely_new, initial=bootstrapping)
-                    if bootstrapping:
-                        store.set_initialized()
-                    await deliver_outbox(chat_id)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    log.exception("FBS polling failed")
-                    await bot.send_message(chat_id, "Ошибка опроса WB API; повторю позже. Подробности в журнале контейнера.")
-                await asyncio.sleep(POLL_SECONDS)
-    finally:
-        log.info("Order monitoring остановлен")
+    async with aiohttp.ClientSession(headers=headers) as session:
+        while True:
+            try:
+                orders = await fetch_orders(session)
+                ids = [int(o["id"]) for o in orders if "id" in o]
+                statuses = await fetch_statuses(session, ids)
+                bootstrapping = not store.initialized()
+                for order in orders:
+                    oid = int(order["id"])
+                    state = statuses.get(oid, {})
+                    created = order.get("createdAt")
+                    genuinely_new = False
+                    if bootstrapping and created:
+                        try:
+                            genuinely_new = datetime.fromisoformat(created.replace("Z", "+00:00")) >= started
+                        except ValueError:
+                            pass
+                    elif not bootstrapping:
+                        genuinely_new = oid not in store.tracked_ids()
+                    store.upsert_order(order, state.get("supplierStatus"), state.get("wbStatus"), genuinely_new, initial=bootstrapping)
+                if bootstrapping:
+                    store.set_initialized()
+                    log.info("Initial snapshot saved: %d orders", len(orders))
+                queued = len(store.pending_events())
+                await deliver_outbox(chat_id)
+                log.info("Poll ok: %d orders, %d events queued", len(orders), queued)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.error("Orders monitor cycle failed: %s", describe_error(exc))
+                await send_fire_and_forget(bot, chat_id, "Ошибка опроса WB API; повторю позже. Подробности в журнале контейнера.")
+            await asyncio.sleep(POLL_SECONDS)
 
 
 async def check_api():
@@ -240,12 +243,12 @@ async def monitor_balance(chat_id):
                             if value is not None:
                                 store.set_balance(key, value)
                     else:
-                        log.warning("Баланс API returned %s", resp.status)
+                        log.warning("Balance API returned %s: %s", resp.status, (await resp.text())[:500])
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                log.exception("Баланс polling failed")
-            await asyncio.sleep(120)
+            except Exception as exc:
+                log.error("Balance monitor cycle failed: %s", describe_error(exc))
+            await asyncio.sleep(BALANCE_POLL_SECONDS)
 
 
 @dp.message(Command("start"))
@@ -254,12 +257,22 @@ async def start_handler(message: types.Message):
     try:
         await check_api()
     except Exception as exc:
+        log.error("/start in chat %s: WB API unavailable: %s", message.chat.id, describe_error(exc))
         await message.answer(f"WB API недоступен: {html.escape(str(exc))}")
         return
+    started = 0
     if monitor_task is None or monitor_task.done():
-        monitor_task = asyncio.create_task(monitor(message.chat.id))
+        monitor_task = asyncio.create_task(monitor(message.chat.id), name=f"Orders monitoring for chat {message.chat.id}")
+        monitor_task.add_done_callback(log_task_end)
+        started += 1
     if balance_task is None or balance_task.done():
-        balance_task = asyncio.create_task(monitor_balance(message.chat.id))
+        balance_task = asyncio.create_task(monitor_balance(message.chat.id), name=f"Balance monitoring for chat {message.chat.id}")
+        balance_task.add_done_callback(log_task_end)
+        started += 1
+    if started:
+        log.info("/start in chat %s: %d tasks started", message.chat.id, started)
+    else:
+        log.info("/start in chat %s: monitoring already running", message.chat.id)
     await message.answer("Мониторинг FBS-заказов и баланса запущен. При первом опросе текущие заказы сохраняются без уведомлений.")
 
 
@@ -268,10 +281,11 @@ async def stop_handler(message: types.Message):
     global monitor_task, balance_task
     tasks = [t for t in (monitor_task, balance_task) if t and not t.done()]
     for task in tasks:
-        task.cancel()
+        task.cancel(f"/stop in chat {message.chat.id}")
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
     monitor_task = balance_task = None
+    log.info("/stop in chat %s: %d tasks cancelled", message.chat.id, len(tasks))
     await message.answer("Мониторинг остановлен." if tasks else "Мониторинг не был запущен.")
 
 
@@ -301,10 +315,22 @@ async def help_handler(message: types.Message):
 
 
 async def main():
-    await bot.delete_webhook(drop_pending_updates=True)
-    log.info("Bot started; monitoring starts only after /start")
-    await dp.start_polling(bot)
+    log.info(
+        "Config: db=%s, orders poll every %ds, balance poll every %ds; monitoring starts only after /start",
+        DB_PATH, POLL_SECONDS, BALANCE_POLL_SECONDS,
+    )
+    log_token_expiry(WB_API)
+    log.info("Store: initialized=%s, %d tracked orders, %d pending events", store.initialized(), len(store.tracked_ids()), len(store.pending_events()))
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except Exception as exc:
+        log.exception("Bot crashed: %s", describe_error(exc))
+        raise SystemExit(1)
