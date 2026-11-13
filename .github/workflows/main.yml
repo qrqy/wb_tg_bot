@@ -52,6 +52,7 @@ jobs:
           docker run -d \
             --name wb_tg_bot \
             --restart unless-stopped \
+            --log-opt max-size=10m --log-opt max-file=3 \
             -e BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
             -v ${{ secrets.DEPLOY_CONFIG_PATH }}:/app/config.py \
             -v wb_tg_bot_data:/data \
